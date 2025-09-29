@@ -2,6 +2,7 @@ const express = require("express");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const winston = require("winston");
 
 const app = express();
 
@@ -16,6 +17,18 @@ while (baseUrl.endsWith("/")) {
   baseUrl = baseUrl.slice(0, -1);
 }
 const PUBLIC_BASE_URL = baseUrl;
+
+// Configurar logger con Winston
+const logger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.Console()
+  ]
+});
 
 // Configuracion del almacenamiento de Multer para apuntar al directorio deseado.
 const storage = multer.diskStorage({
@@ -37,10 +50,22 @@ const storage = multer.diskStorage({
   }
 });
 
-const upload = multer({ storage: storage });
+// Filtro para permitir solo archivos de imagen
+const fileFilter = function (req, file, cb) {
+  if (file.mimetype.startsWith('image/')) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only image files are allowed!'));
+  }
+};
+
+const upload = multer({ storage: storage, fileFilter: fileFilter, limits: { fileSize: 5 * 1024 * 1024 } });
 
 // Expone las imagenes subidas para que puedan consultarse directamente.
 app.use("/images", express.static(UPLOAD_DIR));
+
+// Health check endpoint
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 // Endpoint principal que recibe un archivo y devuelve la URL publica.
 app.post("/upload", upload.single("image"), function handleUpload(req, res) {
@@ -54,12 +79,12 @@ app.post("/upload", upload.single("image"), function handleUpload(req, res) {
 
 // Manejador global de errores para expedir respuestas controladas.
 app.use(function errorHandler(err, _req, res, _next) {
-  console.error("Error durante la carga:", err);
+  logger.error("Error durante la carga:", err);
   res.status(500).json({ message: "Error interno del servidor." });
 });
 
 // Arranca el servidor HTTP en el puerto 3000 por defecto.
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, function onListen() {
-  console.log("Microservicio de subida escuchando en el puerto " + PORT);
+  logger.info("Microservicio de subida escuchando en el puerto " + PORT);
 });
