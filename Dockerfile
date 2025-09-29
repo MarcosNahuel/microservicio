@@ -10,17 +10,14 @@ COPY package*.json ./
 # Install dependencies
 RUN npm install
 
-# Create non-root user for runtime
-RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
-
 # Prepare upload directory with correct ownership
-RUN mkdir -p /app/uploads && chown -R nodejs:nodejs /app/uploads
+RUN mkdir -p /var/www/public/images && chown -R node:node /var/www/public/images
 
 # Copy application source
-COPY . .
+COPY --chown=node:node . .
 
 # Switch to non-root user
-USER nodejs
+USER node
 
 # Expose the HTTP port
 EXPOSE 3000
