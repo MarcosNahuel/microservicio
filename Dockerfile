@@ -1,26 +1,30 @@
-# Usa una imagen base oficial de Node.js ligera y segura
+# Use an official Node.js base image
 FROM node:20-alpine
 
-# Establece el directorio de trabajo dentro del contenedor
+# Set working directory
 WORKDIR /app
 
-# Copia los archivos de dependencias
+# Copy dependency manifests
 COPY package*.json ./
 
-# Instala las dependencias del proyecto
+# Install dependencies
 RUN npm install
 
-# Crear usuario no root para mayor seguridad
+# Create non-root user for runtime
 RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
 
-# Copia el resto del código de la aplicación
+# Prepare upload directory with correct ownership
+RUN mkdir -p /app/uploads \\
+    && chown -R nodejs:nodejs /app/uploads
+
+# Copy application source
 COPY . .
 
-# Cambiar a usuario no root
+# Switch to non-root user
 USER nodejs
 
-# Expone el puerto en el que corre la aplicación
+# Expose the HTTP port
 EXPOSE 3000
 
-# El comando para iniciar la aplicación cuando el contenedor arranque
+# Start the service
 CMD ["node", "server.js"]

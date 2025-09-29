@@ -7,7 +7,7 @@ const winston = require("winston");
 const app = express();
 
 // Ruta definitiva para guardar las imagenes publicas.
-const UPLOAD_DIR = "/var/www/public/images";
+const UPLOAD_DIR = "/app/uploads";
 // Crea el directorio de destino si aun no existe.
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
