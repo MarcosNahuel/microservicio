@@ -14,8 +14,7 @@ RUN npm install
 RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
 
 # Prepare upload directory with correct ownership
-RUN mkdir -p /app/uploads \\
-    && chown -R nodejs:nodejs /app/uploads
+RUN mkdir -p /app/uploads && chown -R nodejs:nodejs /app/uploads
 
 # Copy application source
 COPY . .
