@@ -1,0 +1,13 @@
+{
+  "name": "microservicio-subida",
+  "version": "1.0.0",
+  "description": "Microservicio para subir imagenes con Express y Multer",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "multer": "^2.0.2"
+  }
+}
