@@ -1,50 +1,93 @@
-# Microservicio de Subida de Imagenes
+# Microservicio de Upload a Kommo Drive
 
-Este proyecto expone un microservicio en Node.js que recibe archivos mediante POST /upload, los almacena en /var/www/public/images y responde con la URL publica lista para que n8n la procese.
+Servicio HTTP en Node.js que recibe imagenes desde n8n y las sube directamente a Kommo Drive sin almacenar nada en disco. Ofrece dos rutas: con archivo binario (`/upload`) o con URL (`/process-url`).
 
-## Configuracion rapida (local)
-1. Instala dependencias: npm install
-2. Define la URL base:
-   - Windows (PowerShell): setx PUBLIC_BASE_URL http://localhost:3000
-   - Linux/macOS: export PUBLIC_BASE_URL=http://localhost:3000
-3. Ejecuta: npm start
-4. Prueba: curl -F "image=@ruta/archivo.jpg" http://localhost:3000/upload
+## Requisitos
+- Node.js 20+
+- Cuenta Kommo con acceso a la Drive API y un token OAuth valido que llega desde n8n
 
-## Estructura
-- server.js: Servicio Express + Multer.
-- package.json: Dependencias y scripts.
-- nginx/microservicio.conf: Bloque Nginx listo para Ubuntu/Hostinger.
+## Instalacion rapida
+1. Instala dependencias: `npm install`
+2. (Opcional) Configura variables de entorno
+3. Ejecuta el servicio: `npm start`
+4. Comprueba salud: `curl http://localhost:3000/health`
 
-## Despliegue en Hostinger (Ubuntu 22.04)
-sudo apt update && sudo apt upgrade -y
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs nginx git build-essential
-sudo npm install -g pm2
+## Variables de entorno relevantes
+- `PORT` (default `3000`)
+- `JSON_BODY_LIMIT` limite para `POST /process-url` (default `1mb`)
+- `MAX_UPLOAD_BYTES` tamano maximo aceptado en memoria (default `25MB`)
+- `MAX_REMOTE_BYTES` tope para descargas remotas (default igual a `MAX_UPLOAD_BYTES`)
+- `REMOTE_FETCH_TIMEOUT_MS` timeout al descargar imagenes (default `20000`)
+- `KOMMO_TIMEOUT_MS` timeout al hablar con Kommo (default `20000`)
+- `KOMMO_MAX_RETRIES` reintentos al subir cada chunk (default `1`)
 
-sudo mkdir -p /var/www/microservicio
-sudo mkdir -p /var/www/public/images
-sudo chown -R $USER:$USER /var/www/microservicio
-sudo chown -R $USER:$USER /var/www/public
-sudo chmod 755 /var/www/public /var/www/public/images
+## Endpoints
 
-cd /var/www/microservicio
-git clone https://github.com/tuusuario/microservicio.git .
-npm install
+### POST `/process-url`
+Recomendado: n8n envia solo la URL de la imagen, el `drive_url` y el `access_token`. El microservicio descarga, calcula metadata y sube a Kommo.
 
-PUBLIC_BASE_URL=https://tuservicio.com pm2 start server.js --name microservicio-uploads --update-env
-sudo env PATH=$PATH:/usr/bin pm2 startup systemd -u $USER --hp $HOME
-pm2 save
+**JSON de entrada**
+```json
+{
+  "image_url": "https://cdn.shopify.com/.../imagen.jpg",
+  "drive_url": "https://drive-c.kommo.com",
+  "access_token": "TOKEN_OAUTH2",
+  "file_name": "opcional.jpg"
+}
+```
 
-sudo tee /etc/nginx/sites-available/microservicio < nginx/microservicio.conf
-sudo ln -sf /etc/nginx/sites-available/microservicio /etc/nginx/sites-enabled/microservicio
-sudo nginx -t
-sudo systemctl reload nginx
+**Respuesta**
+```json
+{
+  "success": true,
+  "file": { "name": "imagen.jpg", "size": 123456, "mime_type": "image/jpeg" },
+  "kommo": {
+    "session_uuid": "...",
+    "file_uuid": "...",
+    "session": { "max_part_size": 131072, ... },
+    "upload": { "uuid": "...", "link": { ... } }
+  }
+}
+```
 
-## Certificado SSL (opcional)
-sudo apt install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d tuservicio.com -d www.tuservicio.com
-sudo certbot renew --dry-run
+### POST `/upload`
+Alternativa cuando n8n ya tiene el binario. Se envia un formulario `multipart/form-data` con el archivo y los campos extra.
+
+**Campos**
+- `image` (binario, requerido)
+- `drive_url` (texto, requerido)
+- `access_token` (texto, requerido)
+- `file_name` (texto, opcional)
+
+Ejemplo cURL:
+```bash
+curl -X POST http://localhost:3000/upload \
+  -F "image=@test.jpg" \
+  -F "drive_url=https://drive-c.kommo.com" \
+  -F "access_token=TOKEN"
+```
+
+## Flujo tipico en n8n
+1. Extrae URL de imagen del mensaje
+2. Consulta `drive_url` de la cuenta (endpoint `/account?with=drive_url`)
+3. Construye JSON y llama a `POST /process-url`
+4. Recibe de vuelta metadatos + UUID final de Kommo Drive
+
+## Despliegue rapido (Docker)
+```bash
+docker build -t kommo-upload-service .
+docker run -d --name kommo-upload -p 3000:3000 kommo-upload-service
+```
+
+## Despliegue con PM2 (sin Docker)
+```bash
+pm2 start server.js --name kommo-upload
+pm2 logs kommo-upload
+```
 
 ## Notas
-- Ajusta PUBLIC_BASE_URL al dominio publico en produccion.
-- Respaldar /var/www/public/images periodicamente.
+- El servicio valida tamano y MIME basico; todos los errores se devuelven en JSON.
+- La URL de Kommo se normaliza (`*.amocrm.com` cambia a `*.kommo.com`).
+- No se escribe nada en `/var/www/public/images`; ya no se expone contenido estatico.
+- Si Kommo devuelve `max_part_size`, el microservicio corta el buffer en chunks y los sube respetando ese limite.
+
