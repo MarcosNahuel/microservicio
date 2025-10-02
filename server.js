@@ -70,7 +70,16 @@ app.get("/health", (_req, res) => {
 
 app.post("/process-url", async (req, res, next) => {
   try {
-    const { image_url: imageUrl, drive_url: driveUrl, access_token: accessToken, file_name: overrideFileName } = req.body || {};
+    const {
+      image_url: imageUrl,
+      drive_url: driveUrl,
+      access_token: accessToken,
+      file_name: overrideFileName,
+      entity,
+      entity_id: entityId,
+      subdomain
+    } = req.body || {};
+
     if (!imageUrl || typeof imageUrl !== "string") {
       throw new ValidationError("image_url es requerido");
     }
@@ -87,13 +96,43 @@ app.post("/process-url", async (req, res, next) => {
       accessToken: token
     });
 
+    const fileUuid = uploadResult.upload?.uuid || uploadResult.upload?.id;
+
+    // Si se proporciona entity, entity_id y subdomain, adjuntar automáticamente
+    let attachResult = null;
+    if (entity && entityId && subdomain && fileUuid) {
+      try {
+        attachResult = await attachFileToEntity({
+          entity,
+          entityId,
+          subdomain,
+          fileUuid,
+          accessToken: token
+        });
+
+        logger.info("Archivo adjuntado a entidad", {
+          entity,
+          entityId,
+          fileUuid
+        });
+      } catch (attachError) {
+        logger.warn("No se pudo adjuntar archivo a entidad", {
+          entity,
+          entityId,
+          fileUuid,
+          error: attachError.message
+        });
+      }
+    }
+
     logger.info("Imagen subida a Kommo", {
       origin: "process-url",
       driveUrl: normalizedDrive,
       sessionUuid: uploadResult.session?.uuid || null,
-      kommoFileUuid: uploadResult.upload?.uuid || null,
+      kommoFileUuid: fileUuid,
       fileName: remote.fileName,
-      fileSize: remote.buffer.length
+      fileSize: remote.buffer.length,
+      attached: attachResult !== null
     });
 
     res.json({
@@ -106,7 +145,12 @@ app.post("/process-url", async (req, res, next) => {
         size: remote.buffer.length,
         mime_type: remote.mimeType
       },
-      kommo: formatKommoResponse(uploadResult)
+      kommo: formatKommoResponse(uploadResult),
+      attached: attachResult !== null ? {
+        entity,
+        entity_id: entityId,
+        file_uuid: fileUuid
+      } : null
     });
   } catch (error) {
     next(error);
@@ -133,13 +177,44 @@ app.post("/upload", upload.single("image"), async (req, res, next) => {
       accessToken: token
     });
 
+    const fileUuid = uploadResult.upload?.uuid || uploadResult.upload?.id;
+
+    // Si se proporciona entity, entity_id y subdomain, adjuntar automáticamente
+    let attachResult = null;
+    const { entity, entity_id: entityId, subdomain } = req.body || {};
+    if (entity && entityId && subdomain && fileUuid) {
+      try {
+        attachResult = await attachFileToEntity({
+          entity,
+          entityId,
+          subdomain,
+          fileUuid,
+          accessToken: token
+        });
+
+        logger.info("Archivo adjuntado a entidad", {
+          entity,
+          entityId,
+          fileUuid
+        });
+      } catch (attachError) {
+        logger.warn("No se pudo adjuntar archivo a entidad", {
+          entity,
+          entityId,
+          fileUuid,
+          error: attachError.message
+        });
+      }
+    }
+
     logger.info("Imagen subida a Kommo", {
       origin: "upload",
       driveUrl: normalizedDrive,
       sessionUuid: uploadResult.session?.uuid || null,
-      kommoFileUuid: uploadResult.upload?.uuid || null,
+      kommoFileUuid: fileUuid,
       fileName,
-      fileSize: req.file.buffer.length
+      fileSize: req.file.buffer.length,
+      attached: attachResult !== null
     });
 
     res.json({
@@ -152,7 +227,12 @@ app.post("/upload", upload.single("image"), async (req, res, next) => {
         size: req.file.buffer.length,
         mime_type: mimeType
       },
-      kommo: formatKommoResponse(uploadResult)
+      kommo: formatKommoResponse(uploadResult),
+      attached: attachResult !== null ? {
+        entity,
+        entity_id: entityId,
+        file_uuid: fileUuid
+      } : null
     });
   } catch (error) {
     next(error);
@@ -212,6 +292,45 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   logger.info(`Microservicio escuchando en el puerto ${PORT}`);
 });
+
+async function attachFileToEntity({ entity, entityId, subdomain, fileUuid, accessToken }) {
+  // Validar entity
+  const validEntities = ["leads", "contacts", "companies"];
+  if (!validEntities.includes(entity)) {
+    throw new ValidationError(`entity debe ser uno de: ${validEntities.join(", ")}`);
+  }
+
+  // Normalizar subdomain
+  let normalizedSubdomain = subdomain.trim();
+  if (normalizedSubdomain.includes(".")) {
+    normalizedSubdomain = normalizedSubdomain.split(".")[0];
+  }
+
+  const apiUrl = `https://${normalizedSubdomain}.kommo.com/api/v4/${entity}/${entityId}/files`;
+
+  try {
+    const response = await axios.put(
+      apiUrl,
+      [
+        {
+          file_uuid: fileUuid
+        }
+      ],
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/hal+json"
+        },
+        timeout: KOMMO_TIMEOUT_MS,
+        validateStatus: (status) => status >= 200 && status < 300
+      }
+    );
+
+    return response.data;
+  } catch (error) {
+    throw translateAxiosError(error, "No se pudo adjuntar el archivo a la entidad");
+  }
+}
 
 function uploadHeaders(token) {
   return {
