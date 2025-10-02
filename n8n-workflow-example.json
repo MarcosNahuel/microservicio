@@ -1,0 +1,90 @@
+{
+  "name": "Kommo - Enviar Imagen por WhatsApp",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "Webhook o Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/process-url",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "image_url",
+              "value": "={{ $json.image_url }}"
+            },
+            {
+              "name": "drive_url",
+              "value": "={{ $json.drive_url }}"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $credentials.kommoOAuth2.oauthTokenData.access_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Subir Imagen a Kommo Drive",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [450, 300],
+      "credentials": {
+        "kommoOAuth2": {
+          "id": "1",
+          "name": "Kommo OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "chatId": "={{ $json.chat_id }}",
+        "messageType": "file",
+        "fileUrl": "={{ $node['Subir Imagen a Kommo Drive'].json.kommo.upload.url }}",
+        "fileName": "={{ $node['Subir Imagen a Kommo Drive'].json.file.name }}"
+      },
+      "name": "Enviar por WhatsApp en Kommo",
+      "type": "n8n-nodes-base.kommo",
+      "typeVersion": 1,
+      "position": [650, 300],
+      "credentials": {
+        "kommoOAuth2": {
+          "id": "1",
+          "name": "Kommo OAuth2"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook o Trigger": {
+      "main": [
+        [
+          {
+            "node": "Subir Imagen a Kommo Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Subir Imagen a Kommo Drive": {
+      "main": [
+        [
+          {
+            "node": "Enviar por WhatsApp en Kommo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
